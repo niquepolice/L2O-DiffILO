@@ -1,0 +1,35 @@
+defaults:
+  - _self_
+  - hydra: test
+  - dataset: CA
+  - model: ${dataset}
+
+job_name: k0_${model.k_0}_k1_${model.k_1}_delta_${model.delta}
+
+seed: 3
+cuda: 1
+num_workers: 10
+
+
+
+model_dir: ./workspace/models/${dataset.name}
+mu: 10
+
+paths:
+  data_dir: ./data/${dataset.name}/
+  train_data_dir: ./data/${dataset.name}/train/
+  test_data_dir: ./data/${dataset.name}/test/
+
+  preprocess_dir: ./preprocess/${dataset.name}/
+  data_samples_dir: ./preprocess/${dataset.name}/samples/
+  data_tensors_dir: ./preprocess/${dataset.name}/tensors/
+  data_solution_dir: ./preprocess/${dataset.name}/solutions/
+  data_solve_log_dir: ./preprocess/${dataset.name}/logs/
+
+  model_save_dir: ./workspace/train/${now:%m-%d}/${now:%H:%M:%S}-${job_name}/models/
+
+  test_dir: ${model_dir}/test/${now:%m-%d}/${now:%H:%M:%S}-${job_name}/
+  tensorboard_dir: ${model_dir}/test/${now:%m-%d}/${now:%H:%M:%S}-${job_name}/
+
+
+
