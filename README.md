@@ -3,7 +3,7 @@ This repository contains the implementation of DiffILO, an unsupervised learning
 
 Paper: https://openreview.net/pdf?id=FPfCUJTsCn
 
-**Note:** This is the latest version, and we’re still in the process of organizing and refining the code. Updates will follow. Feel free to reach with any questions.
+**Note:** This is the latest version, and we're still in the process of organizing and refining the code. Updates will follow. Feel free to reach out with any questions.
 
 # Environment Setup
 - Python environment
