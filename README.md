@@ -1,7 +1,7 @@
 # DiffILO: Differentiable Integer Linear Programmin
 This repository contains the implementation of DiffILO, an unsupervised learning approach for predicting solutions to Integer Linear Programs (ILPs).
 
-Paper: https://openreview.net/pdf?id=FPfCUJTsCn
+Paper: [https://openreview.net/pdf?id=FPfCUJTsCn](https://openreview.net/pdf?id=FPfCUJTsCn)
 
 **Note:** This is the latest version, and we're still in the process of organizing and refining the code. Updates will follow. Feel free to reach out with any questions.
 
@@ -55,6 +55,8 @@ DiffILO
 
 ```
 
+# Data Format
+The dataset is located in the `data/` directory. Data instances can be in any format, as long as they are compatible with `scip` and `ecole`. An example dataset is available at [this link](https://drive.google.com/drive/folders/1G9icDM_UVld8tY9tabU4WFGYJq_vtYk5?usp=sharing).
 
 # Usage
 ### 1. Preprocessing
