@@ -78,9 +78,52 @@ Each .lp file contains a Max-3-Cut problem instance in LP format that can be sol
 
 ## Troubleshooting
 
-If you encounter any "storage not resizable" errors during training, it's usually due to inconsistencies in the tensor formats. The custom preprocessing script (`preprocess_m3c.py`) helps prevent these issues by ensuring:
+If you encounter any "storage not resizable" errors during training, it's usually due to inconsistencies in the tensor formats. Follow these steps to fix the issues:
 
-1. All tensors are properly typed (float32 for features, int64/long for indices)
-2. All tensors have contiguous memory layout
-3. Normalization is done safely without division by zero
-4. Tensor shapes are consistent across the dataset 
+### Quick Fix
+
+1. Run our comprehensive dataset fix script:
+```bash
+python fix_m3c_dataset.py
+```
+
+This script:
+- Converts existing data to proper BipartiteNodeData objects
+- Makes sure all tensors have proper types and contiguous memory
+- Tests if the dataset can be batched correctly
+- Updates the config to use the fixed dataset
+
+2. After running the fix script, you should be able to train normally:
+```bash
+python train.py dataset=M3C cuda=0
+```
+
+### Manual Fix Process
+
+If the quick fix doesn't work, you can try the manual process:
+
+1. Use our custom preprocessing script to regenerate the dataset:
+```bash
+python preprocess_m3c.py --data_dir data/M3C --output_dir data/preprocess/M3C
+```
+
+2. Then run the fix script to ensure proper formatting:
+```bash
+python fix_m3c_dataset.py
+```
+
+3. Verify data compatibility with our debug script:
+```bash
+python debug_m3c_batching.py
+```
+
+4. Update the paths in your config to use the fixed dataset.
+
+### Technical Details
+
+The fix script ensures that:
+1. All graph objects are BipartiteNodeData instances (not just lists of tensors)
+2. All tensors are properly typed (float32 for features, int64/long for indices)
+3. All tensors have contiguous memory layout
+4. Normalization is done safely without division by zero
+5. Tensor shapes are consistent across the dataset 

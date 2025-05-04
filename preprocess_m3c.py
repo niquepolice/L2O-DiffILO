@@ -7,6 +7,11 @@ import pyscipopt as scip
 import ecole
 from tqdm import tqdm
 import argparse
+import sys
+
+# Add the project root to the path so we can import DiffILO modules
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from src.model import BipartiteNodeData
 
 def preprocess_instance(file_path, output_samples_dir, output_tensors_dir):
     """Preprocess a single Max-3-Cut LP file into the format expected by DiffILO"""
@@ -115,8 +120,15 @@ def preprocess_instance(file_path, output_samples_dir, output_tensors_dir):
     edge_indices = torch.tensor(indices_spr, dtype=torch.long).contiguous()
     edge_features = torch.tensor(values_spr, dtype=torch.float32).view(-1, 1).contiguous()
     
-    # Create and save graph structure
-    graph = [constraint_features, edge_indices, edge_features, variable_features]
+    # Create a BipartiteNodeData object (DiffILO's graph format)
+    graph = BipartiteNodeData(
+        constraint_features=constraint_features, 
+        edge_indices=edge_indices, 
+        edge_features=edge_features, 
+        variable_features=variable_features
+    )
+    
+    # Save the graph
     sample_path = os.path.join(output_samples_dir, f"{filename}.pkl")
     with open(sample_path, 'wb') as f:
         pickle.dump(graph, f)
