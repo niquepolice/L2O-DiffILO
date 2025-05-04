@@ -36,12 +36,16 @@ Options:
 - `--p_connection`: Probability of connection between neighbors (default: 0.5)
 - `--seed`: Random seed (default: 42)
 
-2. Preprocess the dataset using our custom preprocessing script (recommended):
+2. Preprocess the dataset using the Hydra-based preprocessing script:
 ```bash
-python preprocess_m3c.py --data_dir data/M3C --output_dir data/preprocess/M3C
+# For training data
+python preprocess_m3c.py dataset=M3C mode=train
+
+# For test data
+python preprocess_m3c.py dataset=M3C mode=test
 ```
 
-This script ensures that tensors are properly formatted for PyTorch Geometric, avoiding batching issues.
+This script ensures that tensors are properly formatted for PyTorch Geometric, avoiding batching issues. It uses the same configuration system as the original DiffILO codebase, making it fully compatible.
 
 3. Train DiffILO on the dataset:
 ```bash

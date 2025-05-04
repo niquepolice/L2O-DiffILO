@@ -1,20 +1,24 @@
-import os
-import glob
+import os.path
 import pickle
 import numpy as np
+import hydra
+from omegaconf import DictConfig
+from tqdm import tqdm
+import logging
+import sys
+import glob
 import torch
 import pyscipopt as scip
 import ecole
-from tqdm import tqdm
-import argparse
-import sys
 
 # Add the project root to the path so we can import DiffILO modules
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from src.model import BipartiteNodeData
 
-def preprocess_instance(file_path, output_samples_dir, output_tensors_dir):
-    """Preprocess a single Max-3-Cut LP file into the format expected by DiffILO"""
+def preprocess_instance(file_path, config: DictConfig):
+    """
+    Preprocess a single Max-3-Cut LP file into the format expected by DiffILO.
+    """
     filename = os.path.basename(file_path).split('.')[0]
     
     # Extract features using SCIP
@@ -129,7 +133,7 @@ def preprocess_instance(file_path, output_samples_dir, output_tensors_dir):
     )
     
     # Save the graph
-    sample_path = os.path.join(output_samples_dir, f"{filename}.pkl")
+    sample_path = os.path.join(config.paths.data_samples_dir, f"{filename}.pkl")
     with open(sample_path, 'wb') as f:
         pickle.dump(graph, f)
     
@@ -145,49 +149,48 @@ def preprocess_instance(file_path, output_samples_dir, output_tensors_dir):
         b = torch.tensor(obs.constraint_features, dtype=torch.float32)
         c = torch.tensor(obs.variable_features[:, 0].reshape(-1, 1), dtype=torch.float32)
         
-        tensor_path = os.path.join(output_tensors_dir, f"{filename}.pkl")
+        tensor_path = os.path.join(config.paths.data_tensors_dir, f"{filename}.pkl")
         with open(tensor_path, 'wb') as f:
             pickle.dump((A, b, c), f)
     
     except Exception as e:
-        print(f"Error with ecole extraction for {filename}: {e}")
+        logging.error(f"Error with ecole extraction for {filename}: {e}")
     
     return True
 
-def main():
-    parser = argparse.ArgumentParser(description="Preprocess Max-3-Cut dataset for DiffILO")
-    parser.add_argument("--data_dir", type=str, default="data/M3C", 
-                        help="Directory containing train/test LP files")
-    parser.add_argument("--output_dir", type=str, default="data/preprocess/M3C", 
-                        help="Output directory for preprocessed data")
-    
-    args = parser.parse_args()
-    
-    # Create output directories
-    os.makedirs(os.path.join(args.output_dir, "samples", "train"), exist_ok=True)
-    os.makedirs(os.path.join(args.output_dir, "samples", "test"), exist_ok=True)
-    os.makedirs(os.path.join(args.output_dir, "tensors", "train"), exist_ok=True)
-    os.makedirs(os.path.join(args.output_dir, "tensors", "test"), exist_ok=True)
-    
-    # Process training files
-    train_files = glob.glob(os.path.join(args.data_dir, "train", "*.lp"))
-    print(f"Found {len(train_files)} training files")
-    
-    for file_path in tqdm(train_files, desc="Processing training files"):
-        output_samples_dir = os.path.join(args.output_dir, "samples", "train")
-        output_tensors_dir = os.path.join(args.output_dir, "tensors", "train")
-        preprocess_instance(file_path, output_samples_dir, output_tensors_dir)
-    
-    # Process test files
-    test_files = glob.glob(os.path.join(args.data_dir, "test", "*.lp"))
-    print(f"Found {len(test_files)} test files")
-    
-    for file_path in tqdm(test_files, desc="Processing test files"):
-        output_samples_dir = os.path.join(args.output_dir, "samples", "test")
-        output_tensors_dir = os.path.join(args.output_dir, "tensors", "test")
-        preprocess_instance(file_path, output_samples_dir, output_tensors_dir)
-    
-    print("Preprocessing complete!")
+@hydra.main(version_base=None, config_path="config", config_name="preprocess")
+def preprocess(config: DictConfig):
+    """
+    Main function to preprocess the Max-3-Cut dataset.
+    """
+    logging.basicConfig(
+        format="[%(asctime)s]: %(message)s",
+        level=logging.INFO
+    )
 
-if __name__ == "__main__":
-    main() 
+    # Create output directories
+    os.makedirs(config.paths.data_samples_dir, exist_ok=True)
+    os.makedirs(config.paths.data_tensors_dir, exist_ok=True)
+    os.makedirs(config.paths.data_solution_dir, exist_ok=True)
+    os.makedirs(config.paths.data_solve_log_dir, exist_ok=True)
+    
+    if config.mode == "train":
+        data_dir = config.paths.train_data_dir
+    else:
+        data_dir = config.paths.test_data_dir
+    
+    # Find all LP files
+    files = [f for f in os.listdir(data_dir) if f.endswith('.lp')]
+    
+    logging.info(f"Preprocessing the Max-3-Cut dataset {config.dataset.name} ({config.dataset.full_name}).")
+    logging.info(f"Found {len(files)} LP files in {data_dir}")
+    
+    for file in tqdm(files, desc="Processing files"):
+        file_path = os.path.join(data_dir, file)
+        preprocess_instance(file_path, config)
+    
+    logging.info(f"Preprocessing done.")
+    logging.info(f"The preprocessed data files are saved in {config.paths.preprocess_dir}.")
+
+if __name__ == '__main__':
+    preprocess() 
