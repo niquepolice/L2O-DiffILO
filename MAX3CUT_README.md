@@ -36,10 +36,12 @@ Options:
 - `--p_connection`: Probability of connection between neighbors (default: 0.5)
 - `--seed`: Random seed (default: 42)
 
-2. Preprocess the dataset for DiffILO:
+2. Preprocess the dataset using our custom preprocessing script (recommended):
 ```bash
-python preprocess.py dataset=M3C num_workers=50
+python preprocess_m3c.py --data_dir data/M3C --output_dir data/preprocess/M3C
 ```
+
+This script ensures that tensors are properly formatted for PyTorch Geometric, avoiding batching issues.
 
 3. Train DiffILO on the dataset:
 ```bash
@@ -73,3 +75,12 @@ Each .lp file contains a Max-3-Cut problem instance in LP format that can be sol
 - The dataset uses all binary variables as required by DiffILO
 - Each generated graph has random edge weights for more diverse problem instances
 - The constraints enforce the binary ILP formulation exactly as specified 
+
+## Troubleshooting
+
+If you encounter any "storage not resizable" errors during training, it's usually due to inconsistencies in the tensor formats. The custom preprocessing script (`preprocess_m3c.py`) helps prevent these issues by ensuring:
+
+1. All tensors are properly typed (float32 for features, int64/long for indices)
+2. All tensors have contiguous memory layout
+3. Normalization is done safely without division by zero
+4. Tensor shapes are consistent across the dataset 
