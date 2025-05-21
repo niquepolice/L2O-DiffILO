@@ -7,7 +7,6 @@ from omegaconf import DictConfig
 import logging
 from src.utils import set_seed, set_cpu_num, gumbel_sample
 from tqdm import tqdm
-from tensorboardX import SummaryWriter
 import src.tb_writter as tb_writter
 from src.model import GraphDataset, GNNPredictor
 import torch.optim as optim
@@ -29,7 +28,8 @@ class Trainer:
         loader_kwargs = {
             'batch_size': self.batch_size,
             'follow_batch': ["constraint_features", "variable_features"],
-            'num_workers': 1
+            # 'num_workers': 0, # to see errors https://github.com/lucidrains/denoising-diffusion-pytorch/issues/248#issuecomment-1775323730
+            # 'pin_memory': False
         }
         
         self.train_loader = DataLoader(
@@ -120,7 +120,7 @@ class Trainer:
         logging.info(
             f"Epoch {epoch} {phase} "
             f"loss: {metrics['loss']:0.3f} "
-            f"Obj: {metrics['obj']:0.3f} "
+            f"Obj: {metrics['obj']:0.3f} " + (f"Obj_norm: {metrics['obj_norm']:0.3f} Cons_norm: {metrics['cons_norm']:0.3f} " if 'obj_norm' in metrics else '') +
             f"{phase.lower()}_cons: {metrics['cons']:0.3f}"
             + (f" Best: {metrics['best']:0.3f}" if phase == "Valid" else "")
         )
@@ -130,6 +130,7 @@ class Trainer:
         data_loader = self.train_loader
             
         epoch_loss, epoch_obj, epoch_cons = 0, 0, 0
+        epoch_obj_norm, epoch_cons_norm, epoch_grad_norm = 0, 0, 0
         num_samples = 0
         
         for batch in tqdm(data_loader, desc="Train"):
@@ -145,6 +146,9 @@ class Trainer:
             batch_loss = torch.zeros(1, device=vars_o.device)
             batch_obj = torch.zeros(1, device=vars_o.device) 
             batch_cons = torch.zeros(1, device=vars_o.device)
+            batch_cons_sum = torch.zeros(1, device=vars_o.device)
+            batch_obj_norm = torch.zeros(1, device=vars_o.device)
+            batch_cons_norm = torch.zeros(1, device=vars_o.device)
             batch_best = 0
             batch_best_obj = 0
             batch_mean_obj = 0
@@ -153,6 +157,7 @@ class Trainer:
             for i, g in enumerate(batch):
                 # Sample solutions
                 x = gumbel_sample(logits[i], self.num_samples, 1.0).float().reshape(self.num_samples, -1)
+                x.retain_grad()
                 
                 # Get problem matrices
                 A = g.A.cuda()
@@ -163,12 +168,16 @@ class Trainer:
                 p = torch.sigmoid(logits[i])
                 obj = (p * c).sum()
                 cons_pos = torch.relu(A @ x.T - b).mean(dim=1, keepdim=True)
+                cons_sum = torch.relu(A @ x.T - b).sum()
                 entropy = -(p * torch.log(p + 1e-8) + (1 - p) * torch.log(1 - p + 1e-8)).sum()
                 
                 # Calculate loss based on config
                 if self.loss_config == "normalize" and torch.norm(c) > 0:
                     num_nonzero = torch.count_nonzero(cons_pos)
-                    loss = obj / torch.norm(c) + self.mu * (1 / torch.norm(A, dim=1) * cons_pos.squeeze()).sum() / num_nonzero if num_nonzero > 0 else obj / torch.norm(c)
+                    obj_norm = obj / torch.norm(c)
+                    cons_norm = self.mu * (1 / torch.norm(A, dim=1) * cons_pos.squeeze()).sum() / num_nonzero if num_nonzero > 0 else 0
+                    loss = cons_norm
+                  
                 elif self.loss_config == "sum":
                     loss = obj + self.mu * cons_pos.sum()
                 elif self.loss_config == "mean":
@@ -181,13 +190,16 @@ class Trainer:
                 with torch.no_grad():
                     xx = gumbel_sample(logits[i], 500, 1.0).float().reshape(500, -1)
                     idx = torch.where(torch.relu(A @ xx.T - b).sum(0) == 0)[0]
-                    best = (xx @ c)[idx].min().item() if len(idx) > 0 else float('inf')
+                    best = (xx @ c)[idx].min().item() if len(idx) > 0 else 99999999.1337 # float('inf')
                     best_obj = (xx @ c).min().item()
                     mean_obj = (xx @ c).mean().item()
                 
                 batch_obj += obj
                 batch_cons += cons_pos.sum()
                 batch_loss += loss
+                batch_obj_norm += obj_norm
+                batch_cons_norm += cons_norm
+                batch_cons_sum += cons_sum
                 batch_best += best
                 batch_best_obj += best_obj
                 batch_mean_obj += mean_obj
@@ -196,18 +208,51 @@ class Trainer:
             epoch_loss += batch_loss.item()
             epoch_obj += batch_obj.item()
             epoch_cons += batch_cons.item()
+            epoch_obj_norm += batch_obj_norm.item()
+            epoch_cons_norm += batch_cons_norm.item()
             num_samples += len(batch)
             
             # Normalize batch metrics
             batch_loss = batch_loss / len(batch)
             batch_obj = batch_obj / len(batch)
             batch_cons = batch_cons / len(batch)
+            batch_cons_sum = batch_cons_sum / len(batch)
+            batch_obj_norm = batch_obj_norm / len(batch)
+            batch_cons_norm = batch_cons_norm / len(batch)
             batch_best = batch_best / len(batch)
             batch_best_obj = batch_best_obj / len(batch)
             batch_mean_obj = batch_mean_obj / len(batch)
+
+            if not self.step % 100:
+                if x.grad is not None:
+                    x.grad.zero_()
+                # obj.backward(retain_graph=True)
+                # grad_obj = x.grad.clone()[0]
+                # x.grad.zero_()
+                cons_sum.backward(retain_graph=True)
+                grad_cons_sum = x.grad.clone()[0]
+                x.grad.zero_()
+
+                print("x = ", x[0])
+                print("x_grad_cons_sum = ", grad_cons_sum) 
+
+                #print("x_grad_obj = ", grad_obj) 
             
             # Backward pass
             batch_loss.backward()
+            batch_grad_norm = torch.norm(torch.stack([torch.norm(p.grad.detach(), 2)
+                                   for p in self.model.parameters() if p.grad is not None]), 2)
+
+
+            if not self.step % 100:
+                print("x = ", x[0])
+                print("x_grad = ", x.grad.detach()[0]) 
+
+            batch_grad_norm = torch.norm(torch.stack([torch.norm(p.grad.detach(), 2)
+                                   for p in self.model.parameters() if p.grad is not None]), 2)
+
+            epoch_grad_norm += batch_grad_norm
+            batch_grad_norm /= len(batch)
             self.optimizer.step()
             self.optimizer.zero_grad()
             
@@ -217,7 +262,11 @@ class Trainer:
             tb_writter.add_scalar("Loss/loss", batch_loss.item(), self.step)
             tb_writter.add_scalar("Loss/obj", batch_obj.item(), self.step)
             tb_writter.add_scalar("Loss/cons", batch_cons.item(), self.step)
+            tb_writter.add_scalar("Loss/cons_sum", batch_cons_sum.item(), self.step)
+            tb_writter.add_scalar("Loss/obj_norm", batch_obj_norm.item(), self.step)
+            tb_writter.add_scalar("Loss/cons_norm", batch_cons_norm.item(), self.step)
             tb_writter.add_scalar("Loss/entropy", entropy, self.step)
+            tb_writter.add_scalar("Loss/grad_norm", batch_grad_norm, self.step)
             tb_writter.add_scalar("Params/mu", self.mu, self.step)
             tb_writter.add_scalar("Params/lr_i", self.lr_scheduler.get_last_lr()[1], self.step)
             tb_writter.add_scalar("Params/lr_o", self.lr_scheduler.get_last_lr()[0], self.step)
@@ -238,11 +287,15 @@ class Trainer:
         self.lr_scheduler.step()
         self.mu = self.mu + self.mu_step_size * (epoch_cons / num_samples - self.mu_value)
         self.mu = max(min(self.mu, self.mu_max), self.mu_min)
+        print(f"{self.mu=}")
         
         return {
             "loss": epoch_loss / num_samples,
             "obj": epoch_obj / num_samples,
             "cons": epoch_cons / num_samples,
+            "obj_norm": epoch_obj_norm / num_samples,
+            "cons_norm": epoch_cons_norm / num_samples,
+            "grad_norm": epoch_grad_norm / num_samples,
         }
     
     @torch.no_grad()
@@ -307,7 +360,7 @@ class Trainer:
             num_samples += batch_size
             
             for k in ['loss', 'obj', 'cons', 'best']:
-                epoch_metrics[k] += batch_metrics[k].item()
+                epoch_metrics[k] += batch_metrics[k]
 
             # Log batch metrics
             normalized_metrics = {k: v/batch_size for k,v in batch_metrics.items()}
@@ -337,6 +390,8 @@ def train(config: DictConfig):
                    for f in os.listdir(config.paths.data_samples_dir)]
     split_idx = int(0.80 * len(sample_files))
     train_files, valid_files = sample_files[:split_idx], sample_files[split_idx:]
+    
+    print(f"{len(sample_files)=}")
     
     # Create datasets
     train_data = GraphDataset(train_files)

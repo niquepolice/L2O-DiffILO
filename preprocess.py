@@ -84,7 +84,7 @@ def preprocess_(file: str, config: DictConfig):
             if coeff[k] != 0:
                 indices_spr[0].append(cind)
                 indices_spr[1].append(v_indx)
-                values_spr.append(1)
+                values_spr.append(coeff[k])
             variable_features[v_indx][2] += 1
             variable_features[v_indx][1] += coeff[k] / lcons
             variable_features[v_indx][3] = max(variable_features[v_indx][3], coeff[k])
@@ -97,6 +97,7 @@ def preprocess_(file: str, config: DictConfig):
     constraint_features = torch.as_tensor(constraint_features, dtype=torch.float32)
 
     A = torch.sparse_coo_tensor(indices_spr, values_spr, (ncons, nvars))
+    print(ncons, nvars)
     clip_max = [20000, 1, torch.max(variable_features, 0)[0][2].item()]
     clip_min = [0, -1, 0]
 
@@ -133,7 +134,7 @@ def preprocess_(file: str, config: DictConfig):
     obs = ecole.observation.MilpBipartite().extract(model, True)
     A_i = torch.LongTensor(np.array(obs.edge_features.indices, dtype=int))
     A_e = torch.FloatTensor(obs.edge_features.values)
-    A = torch.sparse_coo_tensor(A_i, A_e).to_dense()         
+    A = torch.sparse_coo_tensor(A_i, A_e).to_dense()
     c = torch.FloatTensor(obs.variable_features[:,0].reshape(-1,1))
     b = torch.FloatTensor(obs.constraint_features)
     sample_tensor_path = os.path.join(config.paths.data_tensors_dir, file.split(".")[0]+'.pkl')
@@ -155,10 +156,12 @@ def preprocess(config: DictConfig):
     
     logging.info(f"Preprocessing the dataset {config.dataset.name} ({config.dataset.full_name}).")
     
-    func = partial(preprocess_, config=config)
-    with mp.Pool(config.num_workers) as pool:
-        for _ in tqdm(pool.imap(func, files), total=len(files), desc="Collect Sample"):
-            pass
+    for file in files:
+        preprocess_(file, config)
+    # func = partial(preprocess_, config=config)
+    # with mp.Pool(config.num_workers) as pool:
+    #     for _ in tqdm(pool.imap(func, files), total=len(files), desc="Collect Sample"):
+    #         pass
     
     logging.info(f"Preprocessing done.")
     logging.info(f"The preprocessed data files are saved in {config.paths.preprocess_dir}.")
